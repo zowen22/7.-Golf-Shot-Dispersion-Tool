@@ -67,19 +67,23 @@ Add these keys to Info.plist (never commit values — use xcconfig):
 
 <key>GOLFBERT_API_KEY</key>
 <string>$(GOLFBERT_API_KEY)</string>
+
+<key>GOLFBERT_SECRET_KEY</key>
+<string>$(GOLFBERT_SECRET_KEY)</string>
 ```
 
 Create `Config/Secrets.xcconfig` (git-ignored):
 ```
 MAPBOX_TOKEN = pk.eyJ1IjoiWU9VUl...
-GOLFBERT_API_KEY = your-golfbert-key-here
+GOLFBERT_API_KEY = your-golfbert-api-key
+GOLFBERT_SECRET_KEY = your-golfbert-secret-key
 ```
 
 In Xcode project settings → Info → Configurations, set the xcconfig for each scheme.
 
 ### API Key sources:
 - **Mapbox**: [account.mapbox.com](https://account.mapbox.com) — create a public token
-- **Golfbert**: [golfbert.com/api](https://golfbert.com/api) — register for API access
+- **Golfbert**: [golfbert.com/api](https://golfbert.com/api) — your dashboard provides both an API Key and a Secret Key. Golfbert uses AWS Signature V4 — `GolfbertSigner.swift` handles signing automatically using `CryptoKit` (no extra SPM package needed).
 
 ---
 
@@ -131,8 +135,3 @@ In `ViewModels/OnboardingViewModel.swift`:
 
 **Expected first build state:** Compiles and launches. Auth screen shows. Map screen shows placeholder until Mapbox import is uncommented. All Firebase calls return stub errors until SDK is wired.
 
----
-
-## Golfbert API Field Name Note
-
-Our models use `convertFromSnakeCase` decoding (set in NetworkService). If Golfbert returns field names that don't follow snake_case → camelCase conversion cleanly, add explicit `CodingKeys` to Course or Hole. Verify against a real API response on first call and adjust models if needed.

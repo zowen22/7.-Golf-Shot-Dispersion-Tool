@@ -15,6 +15,10 @@ final class NetworkService: NetworkServiceProtocol {
     private let monitor = NWPathMonitor()
     private let monitorQueue = DispatchQueue(label: "network.monitor")
     private let isConnectedSubject = CurrentValueSubject<Bool, Never>(true)
+    private let signer = GolfbertSigner(
+        apiKey:    Constants.API.golfbertAPIKey,
+        secretKey: Constants.API.golfbertSecretKey
+    )
 
     var isConnectedPublisher: AnyPublisher<Bool, Never> {
         isConnectedSubject.eraseToAnyPublisher()
@@ -85,10 +89,8 @@ final class NetworkService: NetworkServiceProtocol {
         for attempt in 0...retryCount {
             do {
                 var req = URLRequest(url: url)
-                // TODO: Verify Golfbert auth header with their API docs — "x-api-key" is typical
-                // for AWS API Gateway; swap to Bearer or query param if their docs say otherwise.
-                req.setValue(Constants.API.golfbertAPIKey, forHTTPHeaderField: "x-api-key")
                 req.timeoutInterval = 15
+                signer.sign(&req)
                 let (data, response) = try await URLSession.shared.data(for: req)
                 guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
                     throw NetworkError.httpError((response as? HTTPURLResponse)?.statusCode ?? 0)

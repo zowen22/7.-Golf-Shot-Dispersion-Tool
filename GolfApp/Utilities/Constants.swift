@@ -6,6 +6,9 @@ enum Constants {
         static var golfbertAPIKey: String {
             Bundle.main.infoDictionary?["GOLFBERT_API_KEY"] as? String ?? ""
         }
+        static var golfbertSecretKey: String {
+            Bundle.main.infoDictionary?["GOLFBERT_SECRET_KEY"] as? String ?? ""
+        }
         static var mapboxToken: String {
             Bundle.main.infoDictionary?["MBXAccessToken"] as? String ?? ""
         }
