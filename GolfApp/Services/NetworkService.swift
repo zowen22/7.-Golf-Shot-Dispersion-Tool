@@ -27,32 +27,55 @@ final class NetworkService: NetworkServiceProtocol {
         monitor.start(queue: monitorQueue)
     }
 
+    // MARK: - Course search
+
     func searchCourses(query: String) async throws -> [CourseSearchResult] {
-        let url = URL(string: "\(Constants.API.golfbertBaseURL)/courses?search=\(query.urlEncoded)")!
-        let response: GolfbertListResponse<GolfbertCourseSearchResponse> = try await request(url: url)
-        return response.data.map { $0.toSearchResult() }
+        let url = URL(string: "\(Constants.API.golfbertBaseURL)/courses?name=\(query.urlEncoded)&limit=20")!
+        let response: GolfbertListResponse<GolfbertCourse> = try await request(url: url)
+        return response.resources.map { $0.toSearchResult() }
     }
 
     func nearbyCourses(latitude: Double, longitude: Double) async throws -> [CourseSearchResult] {
-        let url = URL(string: "\(Constants.API.golfbertBaseURL)/courses?lat=\(latitude)&lng=\(longitude)&radius=\(Constants.Map.nearbyCoursesRadius)")!
-        let response: GolfbertListResponse<GolfbertCourseSearchResponse> = try await request(url: url)
+        let url = URL(string: "\(Constants.API.golfbertBaseURL)/courses?lat=\(latitude)&long=\(longitude)&limit=\(Constants.Map.maxNearbyResults)")!
+        let response: GolfbertListResponse<GolfbertCourse> = try await request(url: url)
         let userLoc = CLLocation(latitude: latitude, longitude: longitude)
-        // Golfbert may not return distance — compute it from coordinates if available
-        return response.data.map { $0.toSearchResult() }
-            .prefix(Constants.Map.maxNearbyResults)
-            .map { $0 }
+        return response.resources.map { $0.toSearchResult(userLocation: userLoc) }
     }
+
+    // MARK: - Course detail (2 parallel calls: detail + teeboxes)
 
     func fetchCourseDetail(id: String) async throws -> Course {
-        let url = URL(string: "\(Constants.API.golfbertBaseURL)/courses/\(id)")!
-        let response: GolfbertSingleResponse<GolfbertCourseResponse> = try await request(url: url)
-        return response.data.toCourse()
+        guard let courseId = Int(id) else { throw NetworkError.invalidId }
+        async let courseTask: GolfbertCourse = request(
+            url: URL(string: "\(Constants.API.golfbertBaseURL)/courses/\(courseId)")!
+        )
+        async let teeboxesTask: GolfbertListResponse<GolfbertCourseTeebox> = request(
+            url: URL(string: "\(Constants.API.golfbertBaseURL)/courses/\(courseId)/teeboxes")!
+        )
+        let (course, teeboxes) = try await (courseTask, teeboxesTask)
+        return course.toCourse(teeboxes: teeboxes.resources)
     }
 
+    // MARK: - Hole data (3 calls: course holes list → teeboxes + polygons in parallel)
+
     func fetchHole(courseId: String, holeNumber: Int) async throws -> Hole {
-        let url = URL(string: "\(Constants.API.golfbertBaseURL)/courses/\(courseId)/holes/\(holeNumber)")!
-        let response: GolfbertSingleResponse<GolfbertHoleResponse> = try await request(url: url)
-        return response.data.toHole()
+        guard let courseIdInt = Int(courseId) else { throw NetworkError.invalidId }
+
+        let holesURL = URL(string: "\(Constants.API.golfbertBaseURL)/courses/\(courseIdInt)/holes")!
+        let holesResponse: GolfbertListResponse<GolfbertHole> = try await request(url: holesURL)
+        guard let holeData = holesResponse.resources.first(where: { $0.number == holeNumber }) else {
+            throw NetworkError.holeNotFound
+        }
+
+        let holeId = holeData.id
+        async let teeboxesTask: GolfbertListResponse<GolfbertHoleTeebox> = request(
+            url: URL(string: "\(Constants.API.golfbertBaseURL)/holes/\(holeId)/teeboxes")!
+        )
+        async let polygonsTask: GolfbertListResponse<GolfbertHolePolygon> = request(
+            url: URL(string: "\(Constants.API.golfbertBaseURL)/holes/\(holeId)/polygons")!
+        )
+        let (teeboxes, polygons) = try await (teeboxesTask, polygonsTask)
+        return holeData.toHole(teeboxes: teeboxes.resources, polygons: polygons.resources)
     }
 
     // MARK: - Generic request with one retry
@@ -62,7 +85,9 @@ final class NetworkService: NetworkServiceProtocol {
         for attempt in 0...retryCount {
             do {
                 var req = URLRequest(url: url)
-                req.setValue("Bearer \(Constants.API.golfbertAPIKey)", forHTTPHeaderField: "Authorization")
+                // TODO: Verify Golfbert auth header with their API docs — "x-api-key" is typical
+                // for AWS API Gateway; swap to Bearer or query param if their docs say otherwise.
+                req.setValue(Constants.API.golfbertAPIKey, forHTTPHeaderField: "x-api-key")
                 req.timeoutInterval = 15
                 let (data, response) = try await URLSession.shared.data(for: req)
                 guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
@@ -86,28 +111,24 @@ final class NetworkService: NetworkServiceProtocol {
     }()
 }
 
-// MARK: - Golfbert envelope wrappers
-
-struct GolfbertSingleResponse<T: Decodable>: Decodable {
-    let data: T
-}
-
-struct GolfbertListResponse<T: Decodable>: Decodable {
-    let data: [T]
-}
+// MARK: - Error types
 
 enum NetworkError: LocalizedError {
     case httpError(Int)
     case decodingFailed
     case offline
+    case invalidId
+    case holeNotFound
     case unknown
 
     var errorDescription: String? {
         switch self {
         case .httpError(let code): return "Server error \(code). Please try again."
-        case .decodingFailed: return "Unexpected response from server."
-        case .offline: return "No internet connection."
-        case .unknown: return "Something went wrong. Please try again."
+        case .decodingFailed:      return "Unexpected response from server."
+        case .offline:             return "No internet connection."
+        case .invalidId:           return "Invalid course or hole identifier."
+        case .holeNotFound:        return "Hole not found for this course."
+        case .unknown:             return "Something went wrong. Please try again."
         }
     }
 }

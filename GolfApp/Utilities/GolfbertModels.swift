@@ -1,98 +1,166 @@
 import Foundation
+import CoreLocation
 
-// MARK: - Golfbert API response shapes
-// These decode the raw API JSON and convert to our internal domain models.
-// Field names here must match exactly what Golfbert returns.
-// Verify against a real API response and adjust if needed.
-// Our JSONDecoder uses .convertFromSnakeCase so snake_case → camelCase is automatic.
+// MARK: - Shared primitive
 
-struct GolfbertCourseResponse: Decodable {
-    let id: String
+struct GolfbertPoint: Decodable {
+    let lat: Double
+    let long: Double  // API returns "long" not "lng"
+}
+
+// MARK: - Address
+
+struct GolfbertAddress: Decodable {
+    let city: String?
+    let state: String?
+    let zip: String?
+    let street: String?
+    let country: String?
+}
+
+// MARK: - Course
+// GET /v1/courses/{id}  returns this object directly (no wrapper)
+// GET /v1/courses       returns GolfbertListResponse<GolfbertCourse>
+
+struct GolfbertCourse: Decodable {
+    let id: Int
     let name: String
-    let city: String
-    let state: String
-    let numHoles: Int
-    let tees: [GolfbertTee]
+    let address: GolfbertAddress?
+    let coordinates: GolfbertPoint?
 
-    struct GolfbertTee: Decodable {
-        let name: String
-        let color: String
-        let totalYardage: Int
-    }
-
-    func toCourse(cachedAt: Date = Date()) -> Course {
+    func toCourse(teeboxes: [GolfbertCourseTeebox] = [], cachedAt: Date = Date()) -> Course {
         Course(
-            id: id,
+            id: String(id),
             name: name,
-            city: city,
-            state: state,
-            numHoles: numHoles,
-            tees: tees.map { Course.Tee(name: $0.name, color: $0.color, totalYardage: $0.totalYardage) },
+            city: address?.city ?? "",
+            state: address?.state ?? "",
+            numHoles: 18,
+            tees: teeboxes.compactMap { tb in
+                guard let color = tb.color else { return nil }
+                return Course.Tee(name: tb.teeboxType ?? color, color: color, totalYardage: 0)
+            },
             cachedAt: cachedAt
         )
     }
-}
 
-struct GolfbertCourseSearchResponse: Decodable {
-    let id: String
-    let name: String
-    let city: String
-    let state: String
-    let numHoles: Int
-
-    func toSearchResult(distanceFromUser: Double? = nil) -> CourseSearchResult {
-        CourseSearchResult(
-            id: id,
+    func toSearchResult(userLocation: CLLocation? = nil) -> CourseSearchResult {
+        var distance: Double?
+        if let userLoc = userLocation, let coords = coordinates {
+            distance = userLoc.distance(from: CLLocation(latitude: coords.lat, longitude: coords.long))
+        }
+        return CourseSearchResult(
+            id: String(id),
             name: name,
-            city: city,
-            state: state,
-            numHoles: numHoles,
-            distanceFromUser: distanceFromUser
+            city: address?.city ?? "",
+            state: address?.state ?? "",
+            numHoles: 18,
+            distanceFromUser: distance
         )
     }
 }
 
-struct GolfbertHoleResponse: Decodable {
-    let id: String
-    let courseId: String
-    let holeNumber: Int
-    let tees: [GolfbertHoleTee]
-    let green: GolfbertPoint
-    let fairway: GolfbertGeoJSON?
-    let hazards: GolfbertGeoJSON?
+// MARK: - Course teebox
+// GET /v1/courses/{id}/teeboxes returns GolfbertListResponse<GolfbertCourseTeebox>
 
-    struct GolfbertHoleTee: Decodable {
-        let color: String
-        let yardage: Int
-        let lat: Double
-        let lng: Double
+struct GolfbertCourseTeebox: Decodable {
+    let color: String?
+    let slope: Double?
+    let rating: Double?
+    let teeboxType: String?
+
+    enum CodingKeys: String, CodingKey {
+        case color, slope, rating
+        case teeboxType = "teeboxtype"
+    }
+}
+
+// MARK: - Hole
+// GET /v1/holes/{id}          returns this object directly (no wrapper)
+// GET /v1/courses/{id}/holes  returns GolfbertListResponse<GolfbertHole>
+
+struct GolfbertHole: Decodable {
+    let id: Int
+    let number: Int
+    let courseId: Int
+    let flagCoords: GolfbertPoint?
+    let rotation: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case id, number, rotation
+        case courseId   = "courseid"
+        case flagCoords = "flagcoords"
     }
 
-    struct GolfbertPoint: Decodable {
-        let lat: Double
-        let lng: Double
-    }
+    func toHole(teeboxes: [GolfbertHoleTeebox], polygons: [GolfbertHolePolygon]) -> Hole {
+        let green = flagCoords.map { Coordinate(latitude: $0.lat, longitude: $0.long) }
+                    ?? Coordinate(latitude: 0, longitude: 0)
 
-    struct GolfbertGeoJSON: Decodable {
-        let type: String
-        let coordinates: [[Double]]
-    }
+        let fairwayPolygon = polygons.first { $0.surfaceType?.lowercased() == "fairway" }
 
-    func toHole() -> Hole {
-        Hole(
-            id: id,
-            courseId: courseId,
-            holeNumber: holeNumber,
-            teeBoxes: tees.map {
-                Hole.TeeBox(
-                    color: $0.color,
-                    yardage: $0.yardage,
-                    coordinate: Coordinate(latitude: $0.lat, longitude: $0.lng)
+        return Hole(
+            id: String(id),
+            courseId: String(courseId),
+            holeNumber: number,
+            teeBoxes: teeboxes.compactMap { tb in
+                guard let color = tb.color, let coords = tb.coordinates else { return nil }
+                return Hole.TeeBox(
+                    color: color,
+                    yardage: tb.length ?? 0,
+                    coordinate: Coordinate(latitude: coords.lat, longitude: coords.long)
                 )
             },
-            greenCenterCoordinate: Coordinate(latitude: green.lat, longitude: green.lng),
-            fairwayGeometry: fairway.map { GeoJSONGeometry(type: $0.type, coordinates: $0.coordinates) },
-            hazardsGeometry: hazards.map { GeoJSONGeometry(type: $0.type, coordinates: $0.coordinates) }
+            greenCenterCoordinate: green,
+            fairwayGeometry: fairwayPolygon.flatMap { poly -> GeoJSONGeometry? in
+                guard let pts = poly.polygon, !pts.isEmpty else { return nil }
+                // GeoJSON stores coordinates as [longitude, latitude]
+                return GeoJSONGeometry(type: "Polygon", coordinates: pts.map { [$0.long, $0.lat] })
+            },
+            hazardsGeometry: nil
         )
     }
 }
+
+// MARK: - Hole teebox
+// GET /v1/holes/{id}/teeboxes returns GolfbertListResponse<GolfbertHoleTeebox>
+
+struct GolfbertHoleTeebox: Decodable {
+    let holeId: Int
+    let holeNumber: Int?
+    let color: String?
+    let length: Int?      // yardage
+    let par: Int?
+    let handicap: Int?
+    let coordinates: GolfbertPoint?
+    let teeboxType: String?
+
+    enum CodingKeys: String, CodingKey {
+        case color, length, par, handicap, coordinates
+        case holeId     = "holeid"
+        case holeNumber = "holenumber"
+        case teeboxType = "teeboxtype"
+    }
+}
+
+// MARK: - Hole polygon
+// GET /v1/holes/{id}/polygons returns GolfbertListResponse<GolfbertHolePolygon>
+
+struct GolfbertHolePolygon: Decodable {
+    let holeId: Int
+    let surfaceType: String?
+    let polygon: [GolfbertPoint]?
+
+    enum CodingKeys: String, CodingKey {
+        case polygon
+        case holeId     = "holeid"
+        case surfaceType = "surfacetype"
+    }
+}
+
+// MARK: - Envelope wrappers
+
+// All list endpoints return { "resources": [...] }
+struct GolfbertListResponse<T: Decodable>: Decodable {
+    let resources: [T]
+}
+
+// Single-resource endpoints (GET /v1/courses/{id}, GET /v1/holes/{id}) return the object directly.
