@@ -9,6 +9,9 @@ protocol NetworkServiceProtocol {
     func nearbyCourses(latitude: Double, longitude: Double) async throws -> [CourseSearchResult]
     func fetchCourseDetail(id: String) async throws -> Course
     func fetchHole(courseId: String, holeNumber: Int) async throws -> Hole
+    /// Fetches all holes for a course in one batch: 1 call for the hole list +
+    /// parallel teebox/polygon calls per hole. Prefer this over 18 individual fetchHole calls.
+    func fetchAllHoles(courseId: String) async throws -> [Hole]
 }
 
 final class NetworkService: NetworkServiceProtocol {
@@ -80,6 +83,35 @@ final class NetworkService: NetworkServiceProtocol {
         )
         let (teeboxes, polygons) = try await (teeboxesTask, polygonsTask)
         return holeData.toHole(teeboxes: teeboxes.resources, polygons: polygons.resources)
+    }
+
+    // MARK: - Batch hole fetch (1 holes-list call + N×2 parallel teebox/polygon calls)
+
+    func fetchAllHoles(courseId: String) async throws -> [Hole] {
+        guard let courseIdInt = Int(courseId) else { throw NetworkError.invalidId }
+
+        let holesURL = URL(string: "\(Constants.API.golfbertBaseURL)/courses/\(courseIdInt)/holes")!
+        let holesResponse: GolfbertListResponse<GolfbertHole> = try await request(url: holesURL)
+
+        let holes = try await withThrowingTaskGroup(of: Hole.self) { group in
+            for holeData in holesResponse.resources {
+                group.addTask { [self] in
+                    let holeId = holeData.id
+                    async let teeboxesTask: GolfbertListResponse<GolfbertHoleTeebox> = self.request(
+                        url: URL(string: "\(Constants.API.golfbertBaseURL)/holes/\(holeId)/teeboxes")!
+                    )
+                    async let polygonsTask: GolfbertListResponse<GolfbertHolePolygon> = self.request(
+                        url: URL(string: "\(Constants.API.golfbertBaseURL)/holes/\(holeId)/polygons")!
+                    )
+                    let (teeboxes, polygons) = try await (teeboxesTask, polygonsTask)
+                    return holeData.toHole(teeboxes: teeboxes.resources, polygons: polygons.resources)
+                }
+            }
+            var acc: [Hole] = []
+            for try await hole in group { acc.append(hole) }
+            return acc
+        }
+        return holes.sorted { $0.holeNumber < $1.holeNumber }
     }
 
     // MARK: - Generic request with one retry

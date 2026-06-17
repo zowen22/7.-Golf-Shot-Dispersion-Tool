@@ -5,7 +5,17 @@ struct HoleSelectorView: View {
     let teeColor: String
     let mode: CourseMode
     let appState: AppState
+
+    @StateObject private var roundVM: ActiveRoundViewModel
     @State private var prefetchedHoles: [Int: Hole] = [:]
+
+    init(course: Course, teeColor: String, mode: CourseMode, appState: AppState) {
+        self.course = course
+        self.teeColor = teeColor
+        self.mode = mode
+        self.appState = appState
+        _roundVM = StateObject(wrappedValue: ActiveRoundViewModel(firestoreService: appState.firestoreService))
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -15,12 +25,13 @@ struct HoleSelectorView: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
-                    ForEach(1...course.numHoles, id: \.self) { holeNum in
+                    ForEach(1...max(1, course.numHoles), id: \.self) { holeNum in
                         NavigationLink(destination: HoleMapView(
                             courseId: course.id,
                             holeNumber: holeNum,
                             teeColor: teeColor,
                             totalHoles: course.numHoles,
+                            roundVM: roundVM,
                             appState: appState
                         )) {
                             holeCard(number: holeNum)
@@ -34,7 +45,11 @@ struct HoleSelectorView: View {
         }
         .navigationTitle(course.name)
         .navigationBarTitleDisplayMode(.inline)
-        .task { await prefetchAllHoles() }
+        .task {
+            let userId = appState.authState.currentUser?.id ?? ""
+            roundVM.start(courseId: course.id, userId: userId, teeColor: teeColor, mode: mode)
+            await prefetchAllHoles()
+        }
     }
 
     private func holeCard(number: Int) -> some View {
@@ -56,24 +71,37 @@ struct HoleSelectorView: View {
         .cornerRadius(12)
     }
 
+    // MARK: - Hole prefetch
+
     private func prefetchAllHoles() async {
-        await withTaskGroup(of: (Int, Hole?).self) { group in
+        guard course.numHoles > 0 else { return }
+
+        // Step 1: parallel Firestore cache check for all holes
+        let cached = await withTaskGroup(of: (Int, Hole?).self) { group in
             for n in 1...course.numHoles {
                 group.addTask {
-                    let cached = try? await appState.firestoreService.fetchHole(courseId: course.id, holeNumber: n)
-                    if let hole = cached { return (n, hole) }
-                    let fetched = try? await appState.networkService.fetchHole(courseId: course.id, holeNumber: n)
-                    if let hole = fetched {
-                        try? await appState.firestoreService.saveHole(hole, courseId: course.id)
-                    }
-                    return (n, fetched)
+                    let h = try? await appState.firestoreService.fetchHole(courseId: course.id, holeNumber: n)
+                    return (n, h)
                 }
             }
+            var acc: [Int: Hole] = [:]
             for await (n, hole) in group {
-                if let h = hole {
-                    await MainActor.run { prefetchedHoles[n] = h }
-                }
+                if let h = hole { acc[n] = h }
             }
+            return acc
+        }
+        prefetchedHoles = cached
+
+        // Step 2: batch-fetch uncached holes — 1 API call for hole list + N×2 parallel calls,
+        // instead of N×3 calls that individual fetchHole would require.
+        let missing = Set(1...course.numHoles).subtracting(cached.keys)
+        guard !missing.isEmpty,
+              let allFetched = try? await appState.networkService.fetchAllHoles(courseId: course.id)
+        else { return }
+
+        for hole in allFetched where missing.contains(hole.holeNumber) {
+            prefetchedHoles[hole.holeNumber] = hole
+            Task { try? await appState.firestoreService.saveHole(hole, courseId: course.id) }
         }
     }
 }

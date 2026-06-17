@@ -2,21 +2,24 @@ import SwiftUI
 
 struct HoleMapView: View {
     let courseId: String
-    let holeNumber: Int
     let teeColor: String
     let totalHoles: Int
     let appState: AppState
+    let roundVM: ActiveRoundViewModel
 
     @StateObject private var vm: MapViewModel
+    @State private var currentHoleNumber: Int
     @State private var showYardsUnit = true
 
-    init(courseId: String, holeNumber: Int, teeColor: String, totalHoles: Int, appState: AppState) {
+    init(courseId: String, holeNumber: Int, teeColor: String, totalHoles: Int,
+         roundVM: ActiveRoundViewModel, appState: AppState) {
         self.courseId = courseId
-        self.holeNumber = holeNumber
         self.teeColor = teeColor
         self.totalHoles = totalHoles
+        self.roundVM = roundVM
         self.appState = appState
         _vm = StateObject(wrappedValue: MapViewModel(appState: appState))
+        _currentHoleNumber = State(initialValue: holeNumber)
     }
 
     private var distanceDisplay: String {
@@ -52,24 +55,22 @@ struct HoleMapView: View {
         }
         .navigationBarHidden(true)
         .gesture(swipeHoleGesture)
-        .onAppear {
-            vm.loadHole(courseId: courseId, holeNumber: holeNumber, teeColor: teeColor)
-        }
+        .onAppear { loadHole(currentHoleNumber) }
     }
 
     private var topBar: some View {
         HStack {
             Button {
-                if holeNumber > 1 { loadHole(holeNumber - 1) }
+                if currentHoleNumber > 1 { loadHole(currentHoleNumber - 1) }
             } label: {
                 Image(systemName: "chevron.left").font(.title3.bold()).foregroundColor(.white)
             }
-            .disabled(holeNumber <= 1)
+            .disabled(currentHoleNumber <= 1)
 
             Spacer()
 
             VStack(spacing: 2) {
-                Text("Hole \(holeNumber)").font(.headline).foregroundColor(.white)
+                Text("Hole \(currentHoleNumber)").font(.headline).foregroundColor(.white)
                 if let hole = vm.hole, let tb = hole.teeBox(forColor: teeColor) {
                     Button {
                         showYardsUnit.toggle()
@@ -83,11 +84,11 @@ struct HoleMapView: View {
             Spacer()
 
             Button {
-                if holeNumber < totalHoles { loadHole(holeNumber + 1) }
+                if currentHoleNumber < totalHoles { loadHole(currentHoleNumber + 1) }
             } label: {
                 Image(systemName: "chevron.right").font(.title3.bold()).foregroundColor(.white)
             }
-            .disabled(holeNumber >= totalHoles)
+            .disabled(currentHoleNumber >= totalHoles)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
@@ -130,15 +131,22 @@ struct HoleMapView: View {
 
     private var swipeHoleGesture: some Gesture {
         DragGesture(minimumDistance: 50).onEnded { value in
-            if value.translation.width < -50, holeNumber < totalHoles { loadHole(holeNumber + 1) }
-            else if value.translation.width > 50, holeNumber > 1 { loadHole(holeNumber - 1) }
+            if value.translation.width < -50, currentHoleNumber < totalHoles {
+                loadHole(currentHoleNumber + 1)
+            } else if value.translation.width > 50, currentHoleNumber > 1 {
+                loadHole(currentHoleNumber - 1)
+            }
         }
     }
 
     private func loadHole(_ number: Int) {
+        currentHoleNumber = number
         vm.loadHole(courseId: courseId, holeNumber: number, teeColor: teeColor)
+        roundVM.markHolePlayed(number)
     }
 }
+
+// MARK: - Helpers
 
 extension View {
     func cornerRadius(_ radius: CGFloat, corners: UIRectCorner) -> some View {
