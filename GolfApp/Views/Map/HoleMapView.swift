@@ -5,29 +5,28 @@ struct HoleMapView: View {
     let holeNumber: Int
     let teeColor: String
     let totalHoles: Int
-    @EnvironmentObject var appState: AppState
+    let appState: AppState
 
     @StateObject private var vm: MapViewModel
     @State private var showYardsUnit = true
 
-    init(courseId: String, holeNumber: Int, teeColor: String, totalHoles: Int) {
+    init(courseId: String, holeNumber: Int, teeColor: String, totalHoles: Int, appState: AppState) {
         self.courseId = courseId
         self.holeNumber = holeNumber
         self.teeColor = teeColor
         self.totalHoles = totalHoles
-        _vm = StateObject(wrappedValue: MapViewModel(appState: AppState()))
+        self.appState = appState
+        _vm = StateObject(wrappedValue: MapViewModel(appState: appState))
     }
 
-    var distanceDisplay: String {
-        guard let unit = appState.authState.currentUser?.distanceUnit else { return "" }
-        let dist = unit == .yards ? vm.distanceToGreenYards : vm.distanceToGreenYards * 0.9144
-        let suffix = unit == .yards ? "yds" : "m"
+    private var distanceDisplay: String {
+        let dist = showYardsUnit ? vm.distanceToGreenYards : vm.distanceToGreenYards * 0.9144
+        let suffix = showYardsUnit ? "yds" : "m"
         return "\(Int(dist)) \(suffix)"
     }
 
     var body: some View {
         ZStack(alignment: .top) {
-            // Map
             if let hole = vm.hole {
                 MapboxMapView(
                     shotCoordinate: Binding(
@@ -45,7 +44,6 @@ struct HoleMapView: View {
                 if vm.isLoading { ProgressView().tint(.white) }
             }
 
-            // Top bar overlay
             VStack(spacing: 0) {
                 topBar
                 Spacer()
@@ -59,47 +57,35 @@ struct HoleMapView: View {
         }
     }
 
-    // MARK: - Top bar
-
     private var topBar: some View {
         HStack {
-            // Previous hole
             Button {
-                if holeNumber > 1 { navigateToHole(holeNumber - 1) }
+                if holeNumber > 1 { loadHole(holeNumber - 1) }
             } label: {
-                Image(systemName: "chevron.left")
-                    .font(.title3.bold())
-                    .foregroundColor(.white)
+                Image(systemName: "chevron.left").font(.title3.bold()).foregroundColor(.white)
             }
             .disabled(holeNumber <= 1)
 
             Spacer()
 
             VStack(spacing: 2) {
-                Text("Hole \(holeNumber)")
-                    .font(.headline)
-                    .foregroundColor(.white)
+                Text("Hole \(holeNumber)").font(.headline).foregroundColor(.white)
                 if let hole = vm.hole, let tb = hole.teeBox(forColor: teeColor) {
                     Button {
                         showYardsUnit.toggle()
                     } label: {
                         let dist = showYardsUnit ? "\(tb.yardage) yds" : "\(Int(Double(tb.yardage) * 0.9144)) m"
-                        Text(dist)
-                            .font(.subheadline)
-                            .foregroundColor(.white.opacity(0.8))
+                        Text(dist).font(.subheadline).foregroundColor(.white.opacity(0.8))
                     }
                 }
             }
 
             Spacer()
 
-            // Next hole
             Button {
-                if holeNumber < totalHoles { navigateToHole(holeNumber + 1) }
+                if holeNumber < totalHoles { loadHole(holeNumber + 1) }
             } label: {
-                Image(systemName: "chevron.right")
-                    .font(.title3.bold())
-                    .foregroundColor(.white)
+                Image(systemName: "chevron.right").font(.title3.bold()).foregroundColor(.white)
             }
             .disabled(holeNumber >= totalHoles)
         }
@@ -108,11 +94,8 @@ struct HoleMapView: View {
         .background(Color.black.opacity(0.5))
     }
 
-    // MARK: - Bottom controls
-
     private var bottomControls: some View {
         VStack(spacing: 12) {
-            // Club suggestion (only when tier 2+)
             if let club = vm.suggestedClub {
                 ClubSuggestionView(
                     primaryClub: club,
@@ -121,11 +104,12 @@ struct HoleMapView: View {
                 )
             }
 
-            // Distance readouts
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("To Pin").font(.caption).foregroundColor(.secondary)
-                    Text(distanceDisplay).font(.title3.bold())
+                    Text(distanceDisplay)
+                        .font(.title3.bold())
+                        .accessibilityValue("Distance to green: \(distanceDisplay)")
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 2) {
@@ -134,7 +118,6 @@ struct HoleMapView: View {
                 }
             }
 
-            // Skew selector
             SkewSelectorView(skew: Binding(
                 get: { vm.skew },
                 set: { vm.updateSkew($0) }
@@ -145,20 +128,14 @@ struct HoleMapView: View {
         .cornerRadius(20, corners: [.topLeft, .topRight])
     }
 
-    // MARK: - Hole navigation
-
     private var swipeHoleGesture: some Gesture {
-        DragGesture(minimumDistance: 50)
-            .onEnded { value in
-                if value.translation.width < -50, holeNumber < totalHoles {
-                    navigateToHole(holeNumber + 1)
-                } else if value.translation.width > 50, holeNumber > 1 {
-                    navigateToHole(holeNumber - 1)
-                }
-            }
+        DragGesture(minimumDistance: 50).onEnded { value in
+            if value.translation.width < -50, holeNumber < totalHoles { loadHole(holeNumber + 1) }
+            else if value.translation.width > 50, holeNumber > 1 { loadHole(holeNumber - 1) }
+        }
     }
 
-    private func navigateToHole(_ number: Int) {
+    private func loadHole(_ number: Int) {
         vm.loadHole(courseId: courseId, holeNumber: number, teeColor: teeColor)
     }
 }

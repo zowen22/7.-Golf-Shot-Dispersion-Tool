@@ -2,29 +2,21 @@ import SwiftUI
 
 struct MainTabView: View {
     let user: User
-    @EnvironmentObject var appState: AppState
+    let appState: AppState
 
     var body: some View {
         TabView {
-            HomeView(user: user)
-                .tabItem {
-                    Label("Home", systemImage: "house.fill")
-                }
+            HomeView(user: user, appState: appState)
+                .tabItem { Label("Home", systemImage: "house.fill") }
 
-            CourseSearchView(mode: .round)
-                .tabItem {
-                    Label("Round", systemImage: "flag.fill")
-                }
+            CourseSearchView(mode: .round, appState: appState)
+                .tabItem { Label("Round", systemImage: "flag.fill") }
 
-            BagManagementView(userId: user.id)
-                .tabItem {
-                    Label("Bag", systemImage: "bag.fill")
-                }
+            BagManagementView(userId: user.id, appState: appState)
+                .tabItem { Label("Bag", systemImage: "bag.fill") }
 
-            ProfileView(user: user)
-                .tabItem {
-                    Label("Profile", systemImage: "person.fill")
-                }
+            ProfileView(user: user, appState: appState)
+                .tabItem { Label("Profile", systemImage: "person.fill") }
         }
         .accentColor(.green)
     }

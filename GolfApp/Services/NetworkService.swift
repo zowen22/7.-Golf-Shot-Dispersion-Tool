@@ -28,25 +28,29 @@ final class NetworkService: NetworkServiceProtocol {
 
     func searchCourses(query: String) async throws -> [CourseSearchResult] {
         let url = URL(string: "\(Constants.API.golfbertBaseURL)/courses?search=\(query.urlEncoded)")!
-        return try await request(url: url)
+        let response: GolfbertListResponse<CourseSearchResult> = try await request(url: url)
+        return response.data
     }
 
     func nearbyCourses(latitude: Double, longitude: Double) async throws -> [CourseSearchResult] {
         let url = URL(string: "\(Constants.API.golfbertBaseURL)/courses?lat=\(latitude)&lng=\(longitude)&radius=\(Constants.Map.nearbyCoursesRadius)")!
-        return try await request(url: url)
+        let response: GolfbertListResponse<CourseSearchResult> = try await request(url: url)
+        return response.data
     }
 
     func fetchCourseDetail(id: String) async throws -> Course {
         let url = URL(string: "\(Constants.API.golfbertBaseURL)/courses/\(id)")!
-        return try await request(url: url)
+        let response: GolfbertSingleResponse<Course> = try await request(url: url)
+        return response.data
     }
 
     func fetchHole(courseId: String, holeNumber: Int) async throws -> Hole {
         let url = URL(string: "\(Constants.API.golfbertBaseURL)/courses/\(courseId)/holes/\(holeNumber)")!
-        return try await request(url: url)
+        let response: GolfbertSingleResponse<Hole> = try await request(url: url)
+        return response.data
     }
 
-    // MARK: - Generic request with retry
+    // MARK: - Generic request with one retry
 
     private func request<T: Decodable>(url: URL, retryCount: Int = 1) async throws -> T {
         var lastError: Error = NetworkError.unknown
@@ -59,16 +63,35 @@ final class NetworkService: NetworkServiceProtocol {
                 guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
                     throw NetworkError.httpError((response as? HTTPURLResponse)?.statusCode ?? 0)
                 }
-                return try JSONDecoder().decode(T.self, from: data)
+                return try Self.decoder.decode(T.self, from: data)
             } catch {
                 lastError = error
                 if attempt < retryCount {
-                    try await Task.sleep(nanoseconds: 1_000_000_000)  // 1s before retry
+                    try await Task.sleep(nanoseconds: 1_000_000_000)
                 }
             }
         }
         throw lastError
     }
+
+    // Snake_case strategy covers Golfbert field names like course_id, hole_number, etc.
+    private static let decoder: JSONDecoder = {
+        let d = JSONDecoder()
+        d.keyDecodingStrategy = .convertFromSnakeCase
+        return d
+    }()
+}
+
+// MARK: - Golfbert API response envelope
+
+/// Golfbert wraps single resources as { "data": { ... } }
+struct GolfbertSingleResponse<T: Decodable>: Decodable {
+    let data: T
+}
+
+/// Golfbert wraps collections as { "data": [ ... ] }
+struct GolfbertListResponse<T: Decodable>: Decodable {
+    let data: [T]
 }
 
 enum NetworkError: LocalizedError {

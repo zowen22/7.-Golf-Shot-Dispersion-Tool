@@ -2,22 +2,22 @@ import SwiftUI
 
 struct BagManagementView: View {
     let userId: String
-    @EnvironmentObject var appState: AppState
+    let appState: AppState
     @StateObject private var vm: BagViewModel
     @State private var showAddClub = false
     @State private var selectedClub: Club?
     @State private var clubToDelete: Club?
     @State private var showDeleteConfirm = false
 
-    init(userId: String) {
+    init(userId: String, appState: AppState) {
         self.userId = userId
-        _vm = StateObject(wrappedValue: BagViewModel(appState: AppState(), userId: userId))
+        self.appState = appState
+        _vm = StateObject(wrappedValue: BagViewModel(appState: appState, userId: userId))
     }
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                // Progress header
                 VStack(spacing: 6) {
                     Text(vm.progressText)
                         .font(.subheadline)
@@ -27,7 +27,6 @@ struct BagManagementView: View {
                         .foregroundColor(vm.hasAllDistances ? .green : .secondary)
                         .multilineTextAlignment(.center)
 
-                    // Progress bar
                     let entered = vm.sortedClubs.filter { $0.hasDistance }.count
                     let total = max(vm.sortedClubs.filter { !$0.clubType.isPutter }.count, 1)
                     ProgressView(value: Double(entered), total: Double(total))
@@ -54,7 +53,6 @@ struct BagManagementView: View {
                                 }
                             }
                         }
-
                         Button {
                             showAddClub = true
                         } label: {
@@ -134,10 +132,10 @@ struct AddClubView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Add") {
-                        vm.addClub(type: selectedType, name: customName.isEmpty ? selectedType.rawValue.capitalized : customName)
+                        let name = customName.isEmpty ? selectedType.rawValue.capitalized : customName
+                        vm.addClub(type: selectedType, name: name)
                         dismiss()
                     }
-                    .disabled(customName.isEmpty && selectedType == .iron)
                 }
             }
         }

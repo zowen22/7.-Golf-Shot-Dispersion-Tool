@@ -2,18 +2,18 @@ import SwiftUI
 
 struct ProfileView: View {
     let user: User
-    @EnvironmentObject var appState: AppState
+    let appState: AppState
     @StateObject private var vm: ProfileViewModel
 
-    init(user: User) {
+    init(user: User, appState: AppState) {
         self.user = user
-        _vm = StateObject(wrappedValue: ProfileViewModel(appState: AppState(), user: user))
+        self.appState = appState
+        _vm = StateObject(wrappedValue: ProfileViewModel(appState: appState, user: user))
     }
 
     var body: some View {
         NavigationStack {
             Form {
-                // Editable profile
                 Section("Profile") {
                     TextField("Name", text: $vm.user.name)
                     if var profile = vm.profile {
@@ -36,7 +36,6 @@ struct ProfileView: View {
                     }
                 }
 
-                // Non-editable
                 Section("Account") {
                     LabeledContent("Email", value: vm.user.email)
                     if let profile = vm.profile {
@@ -44,14 +43,12 @@ struct ProfileView: View {
                     }
                 }
 
-                // My Bag shortcut
                 Section {
                     NavigationLink("My Bag") {
-                        BagManagementView(userId: vm.user.id)
+                        BagManagementView(userId: vm.user.id, appState: appState)
                     }
                 }
 
-                // Referral code
                 Section("Referral") {
                     HStack {
                         Text(vm.user.referralCode)
@@ -64,35 +61,29 @@ struct ProfileView: View {
                     }
                 }
 
-                // Subscription
                 Section("Subscription") {
                     LabeledContent("Status", value: vm.user.subscriptionStatus == .paid ? "Active" : "Free")
                     if vm.user.subscriptionStatus == .paid {
                         Button("Manage in App Store") {
-                            // SKPaymentQueue.default().restoreCompletedTransactions() or StoreKit 2
+                            // StoreKit 2: open subscription management URL
                         }
                         .foregroundColor(.green)
                     }
                 }
 
-                // Legal
                 Section {
                     Link("Privacy Policy", destination: URL(string: "https://yourdomain.com/privacy")!)
                     Link("Terms of Service", destination: URL(string: "https://yourdomain.com/terms")!)
                 }
 
-                // Sign out
                 Section {
-                    Button("Sign Out", role: .destructive) {
-                        vm.signOut()
-                    }
+                    Button("Sign Out", role: .destructive) { vm.signOut() }
                 }
             }
             .navigationTitle("Profile")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { vm.saveUserChanges() }
-                        .fontWeight(.semibold)
+                    Button("Save") { vm.saveUserChanges() }.fontWeight(.semibold)
                 }
             }
             .onAppear { vm.load() }

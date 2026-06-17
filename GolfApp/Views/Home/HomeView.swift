@@ -2,26 +2,25 @@ import SwiftUI
 
 struct HomeView: View {
     let user: User
-    @EnvironmentObject var appState: AppState
+    let appState: AppState
     @StateObject private var vm: HomeViewModel
 
-    init(user: User) {
+    init(user: User, appState: AppState) {
         self.user = user
-        _vm = StateObject(wrappedValue: HomeViewModel(appState: AppState(), user: user))
+        self.appState = appState
+        _vm = StateObject(wrappedValue: HomeViewModel(appState: appState, user: user))
     }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
-                    // Greeting
                     Text(vm.greeting)
                         .font(.largeTitle.bold())
                         .padding(.top, 8)
 
-                    // Primary CTAs
                     VStack(spacing: 12) {
-                        NavigationLink(destination: CourseSearchView(mode: .round)) {
+                        NavigationLink(destination: CourseSearchView(mode: .round, appState: appState)) {
                             Label("Start a Round", systemImage: "flag.fill")
                                 .frame(maxWidth: .infinity)
                                 .frame(height: 54)
@@ -30,7 +29,7 @@ struct HomeView: View {
                         .buttonStyle(.borderedProminent)
                         .tint(.green)
 
-                        NavigationLink(destination: CourseSearchView(mode: .study)) {
+                        NavigationLink(destination: CourseSearchView(mode: .study, appState: appState)) {
                             Label("Study a Course", systemImage: "map.fill")
                                 .frame(maxWidth: .infinity)
                                 .frame(height: 54)
@@ -40,13 +39,10 @@ struct HomeView: View {
                         .tint(.green)
                     }
 
-                    // Snapshot widget
                     if let snapshot = vm.snapshotText {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Your Goal").font(.headline)
-                            Text(snapshot)
-                                .font(.body)
-                                .foregroundColor(.secondary)
+                            Text(snapshot).font(.body).foregroundColor(.secondary)
                             if let profile = vm.profile {
                                 HStack {
                                     statPill(label: "Avg", value: "\(profile.averageScore)")
@@ -60,7 +56,6 @@ struct HomeView: View {
                         .cornerRadius(12)
                     }
 
-                    // Recently played (hidden if empty)
                     if !vm.recentRounds.isEmpty {
                         VStack(alignment: .leading, spacing: 12) {
                             Text("Recently Played").font(.headline)
@@ -91,7 +86,7 @@ struct HomeView: View {
     private func recentRoundRow(round: Round) -> some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text(round.courseId).font(.subheadline.weight(.medium))  // replace with course name lookup
+                Text(round.courseId).font(.subheadline.weight(.medium))
                 Text(round.startedAt.formatted(date: .abbreviated, time: .omitted))
                     .font(.caption).foregroundColor(.secondary)
             }

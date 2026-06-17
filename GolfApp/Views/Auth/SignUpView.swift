@@ -1,11 +1,12 @@
 import SwiftUI
 
 struct SignUpView: View {
-    @EnvironmentObject var appState: AppState
+    let appState: AppState
     @StateObject private var viewModel: AuthViewModel
 
-    init() {
-        _viewModel = StateObject(wrappedValue: AuthViewModel(appState: AppState()))
+    init(appState: AppState) {
+        self.appState = appState
+        _viewModel = StateObject(wrappedValue: AuthViewModel(appState: appState))
     }
 
     var body: some View {

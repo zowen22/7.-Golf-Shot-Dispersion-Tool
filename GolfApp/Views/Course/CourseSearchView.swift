@@ -2,19 +2,18 @@ import SwiftUI
 
 struct CourseSearchView: View {
     let mode: CourseMode
-    @EnvironmentObject var appState: AppState
+    let appState: AppState
     @StateObject private var vm: CourseSearchViewModel
-    @State private var navigateToHoleSelector = false
 
-    init(mode: CourseMode) {
+    init(mode: CourseMode, appState: AppState) {
         self.mode = mode
-        _vm = StateObject(wrappedValue: CourseSearchViewModel(appState: AppState(), mode: mode))
+        self.appState = appState
+        _vm = StateObject(wrappedValue: CourseSearchViewModel(appState: appState, mode: mode))
     }
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                // Search bar
                 HStack {
                     Image(systemName: "magnifyingglass").foregroundColor(.secondary)
                     TextField("Search courses", text: $vm.searchText)
@@ -40,7 +39,7 @@ struct CourseSearchView: View {
             .navigationBarTitleDisplayMode(.inline)
             .onAppear { vm.onAppear() }
             .navigationDestination(item: $vm.selectedCourse) { course in
-                TeeSelectionView(course: course, mode: mode)
+                TeeSelectionView(course: course, mode: mode, appState: appState)
             }
         }
     }

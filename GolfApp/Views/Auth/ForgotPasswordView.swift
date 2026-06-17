@@ -1,12 +1,13 @@
 import SwiftUI
 
 struct ForgotPasswordView: View {
-    @EnvironmentObject var appState: AppState
+    let appState: AppState
     @StateObject private var viewModel: AuthViewModel
     @State private var sent = false
 
-    init() {
-        _viewModel = StateObject(wrappedValue: AuthViewModel(appState: AppState()))
+    init(appState: AppState) {
+        self.appState = appState
+        _viewModel = StateObject(wrappedValue: AuthViewModel(appState: appState))
     }
 
     var body: some View {
@@ -38,10 +39,8 @@ struct ForgotPasswordView: View {
                         .autocapitalization(.none)
 
                     Button {
-                        Task {
-                            viewModel.sendPasswordReset()
-                            sent = true
-                        }
+                        viewModel.sendPasswordReset()
+                        sent = true
                     } label: {
                         Text("Send Reset Link")
                             .frame(maxWidth: .infinity)

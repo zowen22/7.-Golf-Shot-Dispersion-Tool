@@ -2,12 +2,12 @@ import SwiftUI
 import AuthenticationServices
 
 struct SignInView: View {
-    @EnvironmentObject var appState: AppState
+    let appState: AppState
     @StateObject private var viewModel: AuthViewModel
 
-    init() {
-        // viewModel requires appState — initialized in body via workaround
-        _viewModel = StateObject(wrappedValue: AuthViewModel(appState: AppState()))
+    init(appState: AppState) {
+        self.appState = appState
+        _viewModel = StateObject(wrappedValue: AuthViewModel(appState: appState))
     }
 
     var body: some View {
@@ -15,7 +15,6 @@ struct SignInView: View {
             VStack(spacing: 24) {
                 Spacer(minLength: 60)
 
-                // Logo / wordmark
                 VStack(spacing: 8) {
                     Image(systemName: "flag.fill")
                         .font(.system(size: 48))
@@ -29,9 +28,7 @@ struct SignInView: View {
 
                 Spacer(minLength: 32)
 
-                // Social sign-in
                 VStack(spacing: 12) {
-                    // Sign in with Apple — ASAuthorizationAppleIDButton wrapped in UIViewRepresentable
                     AppleSignInButton()
                         .frame(height: 50)
                         .onTapGesture { viewModel.signInWithApple() }
@@ -49,14 +46,12 @@ struct SignInView: View {
                     .buttonStyle(.bordered)
                 }
 
-                // Divider
                 HStack {
                     Rectangle().frame(height: 1).foregroundColor(.secondary.opacity(0.3))
                     Text("or").foregroundColor(.secondary).font(.caption)
                     Rectangle().frame(height: 1).foregroundColor(.secondary.opacity(0.3))
                 }
 
-                // Email sign-in
                 VStack(spacing: 12) {
                     TextField("Email", text: $viewModel.email)
                         .textFieldStyle(.roundedBorder)
@@ -78,11 +73,10 @@ struct SignInView: View {
                     .tint(.green)
                     .disabled(!viewModel.canSignIn || viewModel.isLoading)
 
-                    NavigationLink("Forgot password?", destination: ForgotPasswordView())
+                    NavigationLink("Forgot password?", destination: ForgotPasswordView(appState: appState))
                         .font(.caption)
                 }
 
-                // Error
                 if let error = viewModel.errorMessage {
                     Text(error)
                         .foregroundColor(.red)
@@ -92,8 +86,7 @@ struct SignInView: View {
 
                 Spacer(minLength: 24)
 
-                // Sign up link
-                NavigationLink(destination: SignUpView()) {
+                NavigationLink(destination: SignUpView(appState: appState)) {
                     HStack(spacing: 4) {
                         Text("Don't have an account?").foregroundColor(.secondary)
                         Text("Sign Up").foregroundColor(.green).fontWeight(.semibold)
@@ -105,13 +98,15 @@ struct SignInView: View {
         }
         .navigationBarHidden(true)
         .overlay {
-            if viewModel.isLoading { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity).background(Color.black.opacity(0.1)) }
+            if viewModel.isLoading {
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.black.opacity(0.1))
+            }
         }
     }
 }
 
-/// Wraps ASAuthorizationAppleIDButton for SwiftUI.
-/// Full delegate implementation goes in AuthService / a coordinator class.
 struct AppleSignInButton: UIViewRepresentable {
     func makeUIView(context: Context) -> ASAuthorizationAppleIDButton {
         ASAuthorizationAppleIDButton(type: .signIn, style: .black)

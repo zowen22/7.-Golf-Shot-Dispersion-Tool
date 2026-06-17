@@ -25,7 +25,17 @@ final class LocationService: NSObject, LocationServiceProtocol, CLLocationManage
     }
 
     func requestPermission() {
-        manager.requestWhenInUseAuthorization()
+        switch manager.authorizationStatus {
+        case .notDetermined:
+            manager.requestWhenInUseAuthorization()
+        case .authorizedWhenInUse, .authorizedAlways:
+            manager.startUpdatingLocation()
+        case .denied, .restricted:
+            // App continues without GPS — course search falls back to manual
+            break
+        @unknown default:
+            break
+        }
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
@@ -37,7 +47,12 @@ final class LocationService: NSObject, LocationServiceProtocol, CLLocationManage
         switch manager.authorizationStatus {
         case .authorizedWhenInUse, .authorizedAlways:
             manager.startUpdatingLocation()
-        default:
+        case .denied, .restricted:
+            // No GPS available — CourseSearchViewModel will show manual search UI
+            break
+        case .notDetermined:
+            break
+        @unknown default:
             break
         }
     }

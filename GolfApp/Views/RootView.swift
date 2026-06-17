@@ -8,11 +8,11 @@ struct RootView: View {
             Group {
                 switch appState.authState {
                 case .unauthenticated:
-                    AuthFlowView()
+                    AuthFlowView(appState: appState)
                 case .onboarding(let user):
-                    OnboardingContainerView(userId: user.id)
+                    OnboardingContainerView(userId: user.id, appState: appState)
                 case .authenticated(let user):
-                    MainTabView(user: user)
+                    MainTabView(user: user, appState: appState)
                 }
             }
             .animation(.easeInOut(duration: 0.3), value: appState.authState.id)

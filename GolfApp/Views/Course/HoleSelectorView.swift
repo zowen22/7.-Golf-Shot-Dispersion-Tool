@@ -4,7 +4,7 @@ struct HoleSelectorView: View {
     let course: Course
     let teeColor: String
     let mode: CourseMode
-    @EnvironmentObject var appState: AppState
+    let appState: AppState
     @State private var prefetchedHoles: [Int: Hole] = [:]
 
     var body: some View {
@@ -20,7 +20,8 @@ struct HoleSelectorView: View {
                             courseId: course.id,
                             holeNumber: holeNum,
                             teeColor: teeColor,
-                            totalHoles: course.numHoles
+                            totalHoles: course.numHoles,
+                            appState: appState
                         )) {
                             holeCard(number: holeNum)
                         }
@@ -56,13 +57,16 @@ struct HoleSelectorView: View {
     }
 
     private func prefetchAllHoles() async {
-        guard let uid = appState.authState.currentUser?.id else { return }
         await withTaskGroup(of: (Int, Hole?).self) { group in
             for n in 1...course.numHoles {
                 group.addTask {
-                    let hole = try? await appState.firestoreService.fetchHole(courseId: course.id, holeNumber: n)
-                        ?? appState.networkService.fetchHole(courseId: course.id, holeNumber: n)
-                    return (n, hole)
+                    let cached = try? await appState.firestoreService.fetchHole(courseId: course.id, holeNumber: n)
+                    if let hole = cached { return (n, hole) }
+                    let fetched = try? await appState.networkService.fetchHole(courseId: course.id, holeNumber: n)
+                    if let hole = fetched {
+                        try? await appState.firestoreService.saveHole(hole, courseId: course.id)
+                    }
+                    return (n, fetched)
                 }
             }
             for await (n, hole) in group {

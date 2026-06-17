@@ -3,6 +3,7 @@ import SwiftUI
 struct TeeSelectionView: View {
     let course: Course
     let mode: CourseMode
+    let appState: AppState
     @State private var selectedTee: Course.Tee?
 
     var body: some View {
@@ -32,7 +33,7 @@ struct TeeSelectionView: View {
             .listStyle(.plain)
 
             if let tee = selectedTee {
-                NavigationLink(destination: HoleSelectorView(course: course, teeColor: tee.color, mode: mode)) {
+                NavigationLink(destination: HoleSelectorView(course: course, teeColor: tee.color, mode: mode, appState: appState)) {
                     Text("Continue")
                         .frame(maxWidth: .infinity)
                         .frame(height: 54)
