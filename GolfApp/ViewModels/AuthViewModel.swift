@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import AuthenticationServices
 
 @MainActor
 final class AuthViewModel: ObservableObject {
@@ -13,33 +14,63 @@ final class AuthViewModel: ObservableObject {
     private let firestoreService: FirestoreServiceProtocol
     private weak var appState: AppState?
 
+    // Stored between prepareAppleSignIn() and handleAppleSignIn()
+    private var pendingAppleNonce: String?
+
     init(appState: AppState) {
         self.authService = appState.authService
         self.firestoreService = appState.firestoreService
         self.appState = appState
     }
 
-    var canSignIn: Bool {
-        !email.isEmpty && !password.isEmpty
-    }
-
+    var canSignIn: Bool { !email.isEmpty && !password.isEmpty }
     var canSignUp: Bool {
-        !email.isEmpty && !password.isEmpty && !confirmPassword.isEmpty && password == confirmPassword
+        !email.isEmpty && password.count >= 6
+            && !confirmPassword.isEmpty && password == confirmPassword
     }
 
-    func signInWithApple() {
+    // MARK: - Apple Sign In (two-step)
+
+    /// Step 1 — called in SignInWithAppleButton's onRequest closure.
+    /// Returns the SHA256 nonce to set on the request.
+    func prepareAppleSignIn() -> String {
+        let nonce = AuthNonce.generate()
+        pendingAppleNonce = nonce
+        return AuthNonce.sha256(nonce)
+    }
+
+    /// Step 2 — called in SignInWithAppleButton's onCompletion closure.
+    func handleAppleSignIn(result: Result<ASAuthorization, Error>) {
+        switch result {
+        case .success(let auth):
+            guard
+                let credential = auth.credential as? ASAuthorizationAppleIDCredential,
+                let tokenData = credential.identityToken,
+                let idToken = String(data: tokenData, encoding: .utf8),
+                let rawNonce = pendingAppleNonce
+            else {
+                errorMessage = "Apple Sign In failed — missing credential data."
+                return
+            }
+            perform {
+                let uid = try await self.authService.signInWithApple(idToken: idToken, rawNonce: rawNonce)
+                await self.routeAfterAuth(uid: uid)
+            }
+        case .failure(let error):
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - Google Sign In
+
+    func signInWithGoogle(presentingVC: UIViewController) {
         perform {
-            let uid = try await self.authService.signInWithApple()
+            let uid = try await self.authService.signInWithGoogle(presentingViewController: presentingVC)
             await self.routeAfterAuth(uid: uid)
         }
     }
 
-    func signInWithGoogle() {
-        perform {
-            let uid = try await self.authService.signInWithGoogle()
-            await self.routeAfterAuth(uid: uid)
-        }
-    }
+    // MARK: - Email
 
     func signInWithEmail() {
         guard canSignIn else { return }
@@ -58,20 +89,16 @@ final class AuthViewModel: ObservableObject {
     }
 
     func sendPasswordReset() {
-        guard !email.isEmpty else {
-            errorMessage = "Enter your email address first."
-            return
-        }
-        perform {
-            try await self.authService.sendPasswordReset(email: self.email)
-        }
+        guard !email.isEmpty else { errorMessage = "Enter your email address first."; return }
+        perform { try await self.authService.sendPasswordReset(email: self.email) }
     }
+
+    // MARK: - Routing
 
     private func routeAfterAuth(uid: String) async {
         if let user = try? await firestoreService.fetchUser(uid: uid) {
             appState?.authState = user.onboardingComplete ? .authenticated(user) : .onboarding(user)
         } else {
-            // New user — route to onboarding (profile will be created there)
             let newUser = User(
                 id: uid, name: "", email: email, createdAt: Date(),
                 subscriptionStatus: .free, referralCode: generateReferralCode(),
@@ -87,11 +114,8 @@ final class AuthViewModel: ObservableObject {
         errorMessage = nil
         Task {
             defer { isLoading = false }
-            do {
-                try await action()
-            } catch {
-                errorMessage = error.localizedDescription
-            }
+            do { try await action() }
+            catch { errorMessage = error.localizedDescription }
         }
     }
 

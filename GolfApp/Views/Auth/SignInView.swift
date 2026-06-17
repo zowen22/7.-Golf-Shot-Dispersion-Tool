@@ -29,21 +29,19 @@ struct SignInView: View {
                 Spacer(minLength: 32)
 
                 VStack(spacing: 12) {
-                    AppleSignInButton()
-                        .frame(height: 50)
-                        .onTapGesture { viewModel.signInWithApple() }
-
-                    Button {
-                        viewModel.signInWithGoogle()
-                    } label: {
-                        HStack {
-                            Image(systemName: "globe")
-                            Text("Sign in with Google")
-                        }
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 50)
+                    // Native Apple Sign In button — handles ASAuthorizationController internally
+                    SignInWithAppleButton(.signIn) { request in
+                        request.requestedScopes = [.fullName, .email]
+                        request.nonce = viewModel.prepareAppleSignIn()
+                    } onCompletion: { result in
+                        viewModel.handleAppleSignIn(result: result)
                     }
-                    .buttonStyle(.bordered)
+                    .signInWithAppleButtonStyle(.black)
+                    .frame(height: 50)
+
+                    // Google Sign In — needs a UIViewController as presentation context
+                    GoogleSignInButton(viewModel: viewModel)
+                        .frame(height: 50)
                 }
 
                 HStack {
@@ -65,10 +63,14 @@ struct SignInView: View {
                     Button {
                         viewModel.signInWithEmail()
                     } label: {
-                        Text("Sign In")
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 50)
+                        if viewModel.isLoading {
+                            ProgressView().tint(.white)
+                        } else {
+                            Text("Sign In")
+                        }
                     }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 50)
                     .buttonStyle(.borderedProminent)
                     .tint(.green)
                     .disabled(!viewModel.canSignIn || viewModel.isLoading)
@@ -97,19 +99,37 @@ struct SignInView: View {
             .padding(.horizontal, 28)
         }
         .navigationBarHidden(true)
-        .overlay {
-            if viewModel.isLoading {
-                ProgressView()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.black.opacity(0.1))
-            }
-        }
     }
 }
 
-struct AppleSignInButton: UIViewRepresentable {
-    func makeUIView(context: Context) -> ASAuthorizationAppleIDButton {
-        ASAuthorizationAppleIDButton(type: .signIn, style: .black)
+/// Wraps GIDSignIn in a UIViewRepresentable to get a UIViewController presentation context.
+/// Requires GoogleSignIn SPM package — compiles once package is added.
+private struct GoogleSignInButton: UIViewRepresentable {
+    let viewModel: AuthViewModel
+
+    func makeUIView(context: Context) -> UIButton {
+        let button = UIButton(type: .system)
+        button.setTitle("Sign in with Google", for: .normal)
+        button.setImage(UIImage(systemName: "globe"), for: .normal)
+        button.tintColor = .label
+        button.layer.borderWidth = 1
+        button.layer.borderColor = UIColor.systemGray4.cgColor
+        button.layer.cornerRadius = 8
+        button.addTarget(context.coordinator, action: #selector(Coordinator.tapped), for: .touchUpInside)
+        return button
     }
-    func updateUIView(_ uiView: ASAuthorizationAppleIDButton, context: Context) {}
+
+    func updateUIView(_ uiView: UIButton, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(viewModel: viewModel) }
+
+    class Coordinator: NSObject {
+        let viewModel: AuthViewModel
+        init(viewModel: AuthViewModel) { self.viewModel = viewModel }
+
+        @objc func tapped(_ sender: UIButton) {
+            guard let vc = sender.window?.rootViewController else { return }
+            viewModel.signInWithGoogle(presentingVC: vc)
+        }
+    }
 }

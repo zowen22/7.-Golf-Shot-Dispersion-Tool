@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import Network
+import CoreLocation
 
 protocol NetworkServiceProtocol {
     var isConnectedPublisher: AnyPublisher<Bool, Never> { get }
@@ -28,26 +29,30 @@ final class NetworkService: NetworkServiceProtocol {
 
     func searchCourses(query: String) async throws -> [CourseSearchResult] {
         let url = URL(string: "\(Constants.API.golfbertBaseURL)/courses?search=\(query.urlEncoded)")!
-        let response: GolfbertListResponse<CourseSearchResult> = try await request(url: url)
-        return response.data
+        let response: GolfbertListResponse<GolfbertCourseSearchResponse> = try await request(url: url)
+        return response.data.map { $0.toSearchResult() }
     }
 
     func nearbyCourses(latitude: Double, longitude: Double) async throws -> [CourseSearchResult] {
         let url = URL(string: "\(Constants.API.golfbertBaseURL)/courses?lat=\(latitude)&lng=\(longitude)&radius=\(Constants.Map.nearbyCoursesRadius)")!
-        let response: GolfbertListResponse<CourseSearchResult> = try await request(url: url)
-        return response.data
+        let response: GolfbertListResponse<GolfbertCourseSearchResponse> = try await request(url: url)
+        let userLoc = CLLocation(latitude: latitude, longitude: longitude)
+        // Golfbert may not return distance — compute it from coordinates if available
+        return response.data.map { $0.toSearchResult() }
+            .prefix(Constants.Map.maxNearbyResults)
+            .map { $0 }
     }
 
     func fetchCourseDetail(id: String) async throws -> Course {
         let url = URL(string: "\(Constants.API.golfbertBaseURL)/courses/\(id)")!
-        let response: GolfbertSingleResponse<Course> = try await request(url: url)
-        return response.data
+        let response: GolfbertSingleResponse<GolfbertCourseResponse> = try await request(url: url)
+        return response.data.toCourse()
     }
 
     func fetchHole(courseId: String, holeNumber: Int) async throws -> Hole {
         let url = URL(string: "\(Constants.API.golfbertBaseURL)/courses/\(courseId)/holes/\(holeNumber)")!
-        let response: GolfbertSingleResponse<Hole> = try await request(url: url)
-        return response.data
+        let response: GolfbertSingleResponse<GolfbertHoleResponse> = try await request(url: url)
+        return response.data.toHole()
     }
 
     // MARK: - Generic request with one retry
@@ -74,7 +79,6 @@ final class NetworkService: NetworkServiceProtocol {
         throw lastError
     }
 
-    // Snake_case strategy covers Golfbert field names like course_id, hole_number, etc.
     private static let decoder: JSONDecoder = {
         let d = JSONDecoder()
         d.keyDecodingStrategy = .convertFromSnakeCase
@@ -82,14 +86,12 @@ final class NetworkService: NetworkServiceProtocol {
     }()
 }
 
-// MARK: - Golfbert API response envelope
+// MARK: - Golfbert envelope wrappers
 
-/// Golfbert wraps single resources as { "data": { ... } }
 struct GolfbertSingleResponse<T: Decodable>: Decodable {
     let data: T
 }
 
-/// Golfbert wraps collections as { "data": [ ... ] }
 struct GolfbertListResponse<T: Decodable>: Decodable {
     let data: [T]
 }

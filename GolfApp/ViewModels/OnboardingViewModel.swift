@@ -1,10 +1,15 @@
 import Foundation
 import SwiftUI
-import CoreLocation
+import StoreKit   // native Apple framework — no SPM needed
 
 enum OnboardingStep: String, CaseIterable {
     case welcome, name, goal, dreamScore, profile, distanceUnit,
          snapshot, demo, successStories, gpsPermission, referral, paywall
+}
+
+enum StoreKitProducts {
+    static let weekly    = "com.golfapp.subscription.weekly"
+    static let quarterly = "com.golfapp.subscription.quarterly"
 }
 
 @MainActor
@@ -37,10 +42,11 @@ final class OnboardingViewModel: ObservableObject {
         self.locationService = appState.locationService
         self.userId = userId
 
-        // Resume from last completed step
         let saved = UserDefaults.standard.string(forKey: Constants.Onboarding.lastStepKey)
         self.currentStep = saved.flatMap(OnboardingStep.init(rawValue:)) ?? .welcome
     }
+
+    // MARK: - Navigation
 
     func advance() {
         let all = OnboardingStep.allCases
@@ -57,39 +63,94 @@ final class OnboardingViewModel: ObservableObject {
         advance()
     }
 
+    // MARK: - Referral
+
     func applyReferralCode() {
         guard !referralCode.isEmpty else { return }
         isLoading = true
         Task {
             defer { isLoading = false }
-            // Validate referral code against Firestore users collection
-            // For MVP: look for user with matching referralCode field
+            // Firestore lookup: find user with referralCode == self.referralCode
+            // For MVP the validation is just "does anyone have this code"
             // try await firestoreService.validateReferralCode(referralCode)
-            referralApplied = true  // stub — wire Firestore validation
+            // Stub — wire when Firestore is live:
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            referralApplied = true
         }
     }
 
+    // MARK: - StoreKit 2 Purchase
+
     func purchase(productID: String) {
         isLoading = true
+        errorMessage = nil
         Task {
             defer { isLoading = false }
-            // StoreKit 2: Product.products(for: [productID]) → purchase
-            // On success: advance()
+            do {
+                let products = try await Product.products(for: [productID])
+                guard let product = products.first else {
+                    errorMessage = "Product unavailable — check App Store Connect configuration."
+                    return
+                }
+                let result = try await product.purchase()
+                switch result {
+                case .success(let verification):
+                    let transaction = try checkVerified(verification)
+                    await transaction.finish()
+                    advance()
+                case .userCancelled:
+                    break
+                case .pending:
+                    errorMessage = "Purchase is pending approval (e.g. Ask to Buy). Try again once approved."
+                @unknown default:
+                    break
+                }
+            } catch {
+                errorMessage = error.localizedDescription
+            }
         }
     }
 
     func restorePurchases() {
-        // StoreKit 2: AppStore.sync()
+        isLoading = true
+        Task {
+            defer { isLoading = false }
+            do {
+                try await AppStore.sync()
+                for await result in Transaction.currentEntitlements {
+                    if case .verified(let transaction) = result {
+                        let ids = [StoreKitProducts.weekly, StoreKitProducts.quarterly]
+                        if ids.contains(transaction.productID) {
+                            advance()
+                            return
+                        }
+                    }
+                }
+                errorMessage = "No active subscription found."
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
     }
+
+    private func checkVerified<T>(_ result: VerificationResult<T>) throws -> T {
+        switch result {
+        case .unverified: throw StoreKitError.failedVerification
+        case .verified(let value): return value
+        }
+    }
+
+    // MARK: - Computed
 
     var derivedHandicap: Double {
         HandicapCalculator.derivedHandicap(averageScore: averageScore, drivingDistance: drivingDistance)
     }
 
     var scoreGapDisplay: String {
-        let gap = averageScore - dreamScore
-        return "You're \(gap) strokes from your dream game"
+        "You're \(averageScore - dreamScore) strokes from your dream game"
     }
+
+    // MARK: - Completion
 
     private func completeOnboarding() {
         Task {
